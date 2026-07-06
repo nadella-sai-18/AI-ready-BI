@@ -1,0 +1,118 @@
+# =====================================================================
+# Oracle Cloud VM — production deployment of Metabase + MinusX (OSS)
+# ---------------------------------------------------------------------
+# - Reverse proxy + automatic Let's Encrypt SSL via nginx-proxy + acme.
+# - Metabase stores ITS OWN settings/dashboards in a small local Postgres
+#   (metabase-db). Your COLLEGE DATA is NOT here — you connect Metabase &
+#   MinusX to the existing Railway PostgreSQL as a DATA SOURCE in their UI.
+# - MinusX keeps its own state in an embedded pglite volume.
+#
+# Nothing here touches your Railway frontend/backend/Postgres.
+# =====================================================================
+name: college-bi
+
+services:
+  # ---------------- reverse proxy (routes domains -> containers) ----------------
+  nginx-proxy:
+    image: nginxproxy/nginx-proxy:1.6
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./data/certs:/etc/nginx/certs
+      - ./data/vhost:/etc/nginx/vhost.d
+      - ./data/html:/usr/share/nginx/html
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    networks: [web]
+
+  # ---------------- automatic HTTPS certificates (Let's Encrypt) ----------------
+  acme-companion:
+    image: nginxproxy/acme-companion:2.4
+    container_name: acme-companion
+    restart: unless-stopped
+    environment:
+      DEFAULT_EMAIL: ${LETSENCRYPT_EMAIL}
+    volumes:
+      - ./data/certs:/etc/nginx/certs
+      - ./data/vhost:/etc/nginx/vhost.d
+      - ./data/html:/usr/share/nginx/html
+      - ./data/acme:/etc/acme.sh
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on: [nginx-proxy]
+    networks: [web]
+
+  # ---------------- Metabase's OWN metadata DB (NOT college data) ----------------
+  metabase-db:
+    image: postgres:16
+    container_name: metabase-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${MB_DB_DBNAME}
+      POSTGRES_USER: ${MB_DB_USER}
+      POSTGRES_PASSWORD: ${MB_DB_PASS}
+    volumes:
+      - metabase_db_data:/var/lib/postgresql/data
+    networks: [internal]
+
+  # ---------------- Metabase ----------------
+  metabase:
+    image: metabase/metabase:v0.50.21
+    container_name: metabase
+    restart: unless-stopped
+    environment:
+      # Metabase's application database (its own bookkeeping):
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: ${MB_DB_DBNAME}
+      MB_DB_PORT: 5432
+      MB_DB_USER: ${MB_DB_USER}
+      MB_DB_PASS: ${MB_DB_PASS}
+      MB_DB_HOST: metabase-db
+      MB_SITE_URL: https://${METABASE_DOMAIN}
+      JAVA_TOOL_OPTIONS: -Xmx1g
+      # reverse-proxy + SSL wiring:
+      VIRTUAL_HOST: ${METABASE_DOMAIN}
+      VIRTUAL_PORT: "3000"
+      LETSENCRYPT_HOST: ${METABASE_DOMAIN}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
+    depends_on: [metabase-db]
+    networks: [web, internal]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # ---------------- MinusX OSS (self-hosted) ----------------
+  minusx:
+    image: ghcr.io/minusxai/minusx-frontend:latest
+    container_name: minusx
+    platform: linux/amd64            # amd64-only image — see README for ARM VMs
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DB_TYPE: pglite                # MinusX's own storage (NOT college data)
+      PGLITE_DATA_DIR: /app/data/pglite
+      BASE_DUCKDB_DATA_PATH: /app
+      ANALYTICS_DB_DIR: /app/data/analytics
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      NEXTAUTH_URL: https://${MINUSX_DOMAIN}    # fixes login/callback URLs
+      # reverse-proxy + SSL wiring:
+      VIRTUAL_HOST: ${MINUSX_DOMAIN}
+      VIRTUAL_PORT: "3000"
+      LETSENCRYPT_HOST: ${MINUSX_DOMAIN}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
+    volumes:
+      - minusx_data:/app/data
+    networks: [web]
+
+networks:
+  web:
+  internal:
+
+volumes:
+  metabase_db_data:
+  minusx_data:
