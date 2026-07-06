@@ -27,14 +27,17 @@ app = FastAPI(
     version=settings.APP_VERSION,
 )
 
-# CORS. The frontend authenticates with a header token (not cookies), so when
-# CORS_ORIGINS="*" we allow any origin with credentials off (a valid combo);
-# with explicit origins we keep credentials on.
+# CORS. The frontend authenticates with a header token (not cookies).
+#  - CORS_ORIGINS="*"  -> allow any origin (credentials off; a valid combo).
+#  - otherwise         -> allow the listed origins PLUS any *.railway.app host
+#                         via regex, so Railway/Render-style deploys work even
+#                         if CORS_ORIGINS isn't set to the exact frontend URL.
 _cors_origins = settings.cors_origins_list
 _allow_all_origins = "*" in _cors_origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if _allow_all_origins else _cors_origins,
+    allow_origin_regex=None if _allow_all_origins else r"https://.*\.railway\.app",
     allow_credentials=not _allow_all_origins,
     allow_methods=["*"],
     allow_headers=["*"],
