@@ -27,10 +27,15 @@ app = FastAPI(
     version=settings.APP_VERSION,
 )
 
+# CORS. The frontend authenticates with a header token (not cookies), so when
+# CORS_ORIGINS="*" we allow any origin with credentials off (a valid combo);
+# with explicit origins we keep credentials on.
+_cors_origins = settings.cors_origins_list
+_allow_all_origins = "*" in _cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
+    allow_origins=["*"] if _allow_all_origins else _cors_origins,
+    allow_credentials=not _allow_all_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
