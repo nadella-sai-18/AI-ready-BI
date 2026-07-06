@@ -1,0 +1,39 @@
+# =====================================================================
+# Self-hosted MinusX OSS — runs ALONGSIDE the existing college app.
+# Source of truth: https://github.com/minusxai/minusx (install.sh / prod compose)
+#
+# This does NOT touch the college app, its Postgres, or Metabase. MinusX is
+# a standalone BI web app; you connect it to the SAME PostgreSQL database
+# (lms_db) as a data source inside its UI (see README.md).
+#
+# NOTE: Metabase already uses port 3000, so MinusX is exposed on 3100.
+# =====================================================================
+name: minusx
+
+services:
+  minusx:
+    image: ghcr.io/minusxai/minusx-frontend:latest
+    container_name: mx-frontend
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3100}:3000"     # host 3100 -> container 3000
+    env_file:
+      - .env                              # ANTHROPIC_API_KEY, NEXTAUTH_SECRET
+    environment:
+      NODE_ENV: production
+      # Self-host mode: MinusX keeps its OWN app metadata in an embedded
+      # pglite store (NOT the college Postgres — that is added in the UI).
+      DB_TYPE: pglite
+      PGLITE_DATA_DIR: /app/data/pglite
+      BASE_DUCKDB_DATA_PATH: /app
+      ANALYTICS_DB_DIR: /app/data/analytics
+    volumes:
+      - ./data:/app/data                  # MinusX metadata (pglite + duckdb analytics)
+      - ./data/pglite:/app/data/pglite
+      - ./static:/app/public/static
+    # Lets the container reach the college Postgres published on the host
+    # (host.docker.internal:5433). Docker Desktop provides this automatically;
+    # host-gateway is added for Linux hosts.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

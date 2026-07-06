@@ -1,0 +1,4 @@
+# Never commit secrets or MinusX's local state.
+.env
+data/
+static/
