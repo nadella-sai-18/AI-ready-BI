@@ -1,0 +1,83 @@
+# =====================================================================
+# Render Blueprint — Metabase + MinusX for the College Analytics project.
+# ---------------------------------------------------------------------
+# Both are deployed as Render WEB SERVICES from public Docker images
+# (no Dockerfile needed). Render gives each an HTTPS *.onrender.com URL
+# automatically (no Nginx/SSL to manage).
+#
+# - metabase-metadata: a small Render Postgres for Metabase's OWN settings.
+# - Your COLLEGE DATA stays in Railway Postgres and is added as a DATA
+#   SOURCE inside the Metabase & MinusX UIs (see README). Nothing here
+#   touches your Railway frontend/backend/database.
+#
+# Deploy: Render Dashboard -> New -> Blueprint -> pick this repo.
+# Then set the two secret/URL values noted below (ANTHROPIC_API_KEY,
+# MB_SITE_URL, NEXTAUTH_URL). See deploy/render/README.md.
+# =====================================================================
+
+databases:
+  - name: metabase-metadata
+    plan: free                 # Metabase's own metadata DB (NOT college data)
+    databaseName: metabaseapp
+    user: mbadmin
+
+services:
+  # ------------------------------- Metabase -------------------------------
+  - type: web
+    name: metabase
+    runtime: image
+    plan: free                 # 512MB — see README (Metabase likes >=1GB)
+    image:
+      url: docker.io/metabase/metabase:v0.50.21
+    healthCheckPath: /api/health
+    envVars:
+      - key: MB_DB_TYPE
+        value: postgres
+      - key: MB_DB_HOST
+        fromDatabase: { name: metabase-metadata, property: host }
+      - key: MB_DB_PORT
+        fromDatabase: { name: metabase-metadata, property: port }
+      - key: MB_DB_DBNAME
+        fromDatabase: { name: metabase-metadata, property: database }
+      - key: MB_DB_USER
+        fromDatabase: { name: metabase-metadata, property: user }
+      - key: MB_DB_PASS
+        fromDatabase: { name: metabase-metadata, property: password }
+      - key: MB_JETTY_PORT
+        value: "10000"          # Render routes to PORT 10000 by default
+      - key: JAVA_TOOL_OPTIONS
+        value: "-Xmx400m"       # fit the 512MB free instance; raise on bigger plans
+      - key: MB_SITE_URL
+        sync: false             # set to https://<your-metabase>.onrender.com after 1st deploy
+
+  # -------------------------------- MinusX --------------------------------
+  - type: web
+    name: minusx
+    runtime: image
+    plan: free                 # free = ephemeral (data resets on redeploy) — see README
+    image:
+      url: ghcr.io/minusxai/minusx-frontend:latest
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_TYPE
+        value: pglite
+      - key: PGLITE_DATA_DIR
+        value: /app/data/pglite
+      - key: BASE_DUCKDB_DATA_PATH
+        value: /app
+      - key: ANALYTICS_DB_DIR
+        value: /app/data/analytics
+      - key: PORT
+        value: "3000"           # MinusX (Next.js) listens on 3000
+      - key: ANTHROPIC_API_KEY
+        sync: false             # paste your Claude key in the Render dashboard
+      - key: NEXTAUTH_SECRET
+        generateValue: true     # Render generates a strong secret
+      - key: NEXTAUTH_URL
+        sync: false             # set to https://<your-minusx>.onrender.com after 1st deploy
+    # For persistence across redeploys, upgrade this service to a paid plan and add:
+    # disk:
+    #   name: minusx-data
+    #   mountPath: /app/data
+    #   sizeGB: 1
